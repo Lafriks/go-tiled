@@ -43,6 +43,20 @@ func LoadFile(fileName string, options ...LoaderOption) (*Map, error) {
 	return l.LoadFile(fileName)
 }
 
+// LoadTilesetFromReader loads a tileset from an io.Reader.
+// baseDir is used to locate relative paths to additional tileset data; default
+// is currend directory if empty.
+func LoadTilesetFromReader(baseDir string, r io.Reader, options ...LoaderOption) (*Tileset, error) {
+	l := newLoader(options...)
+	return l.LoadTilesetFromReader(baseDir, r)
+}
+
+// LoadTilesetFile loads a tiled map in TSX format from a file.
+func LoadTilesetFile(fileName string, options ...LoaderOption) (*Tileset, error) {
+	l := newLoader(options...)
+	return l.LoadTilesetFile(fileName)
+}
+
 // loader provides configuration on how TMX maps and resources are loaded.
 type loader struct {
 	// A FileSystem that is used for loading TMX files and any external
@@ -105,4 +119,31 @@ func (l *loader) LoadFile(fileName string) (*Map, error) {
 
 	dir := filepath.Dir(fileName)
 	return l.LoadReader(dir, f)
+}
+
+// LoadTilesetFile loads a tileset in TSX format from a file.
+func (l *loader) LoadTilesetFile(fileName string) (*Tileset, error) {
+	f, err := l.open(fileName)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	dir := filepath.Dir(fileName)
+	return l.LoadTilesetFromReader(dir, f)
+}
+
+// LoadTilesetFromReader loads a .tsx file into a Tileset structure
+func (l *loader) LoadTilesetFromReader(baseDir string, r io.Reader) (*Tileset, error) {
+	d := xml.NewDecoder(r)
+
+	t := &Tileset{
+		baseDir: baseDir,
+	}
+	if err := d.Decode(t); err != nil {
+		return nil, err
+	}
+
+	t.SourceLoaded = true
+	return t, nil
 }
