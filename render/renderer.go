@@ -76,6 +76,8 @@ func NewRendererWithFileSystem(m *tiled.Map, fs fs.FS) (*Renderer, error) {
 	r := &Renderer{m: m, tileCache: make(map[uint32]image.Image), fs: fs}
 	if r.m.Orientation == "orthogonal" {
 		r.engine = &OrthogonalRendererEngine{}
+	} else if r.m.Orientation == "hexagonal" {
+		r.engine = &HexagonalRendererEngine{}
 	} else {
 		return nil, ErrUnsupportedOrientation
 	}
@@ -138,9 +140,41 @@ func (r *Renderer) getTileImage(tile *tiled.LayerTile) (image.Image, error) {
 	return r.engine.RotateTileImage(tile, timg), nil
 }
 
+func (r *Renderer) _renderTile(layer *tiled.Layer, i int, x int, y int) error {
+	if layer.Tiles[i].IsNil() {
+		return nil
+	}
+
+	img, err := r.getTileImage(layer.Tiles[i])
+	if err != nil {
+		return err
+	}
+
+	pos := r.engine.GetTilePosition(x, y)
+
+	if layer.Opacity < 1 {
+		mask := image.NewUniform(color.Alpha{uint8(layer.Opacity * 255)})
+
+		draw.DrawMask(r.Result, pos, img, img.Bounds().Min, mask, mask.Bounds().Min, draw.Over)
+	} else {
+		draw.Draw(r.Result, pos, img, img.Bounds().Min, draw.Over)
+	}
+
+	return nil
+}
+
 func (r *Renderer) _renderLayer(layer *tiled.Layer) error {
 	var xs, xe, xi, ys, ye, yi int
-	if r.m.RenderOrder == "" || r.m.RenderOrder == "right-down" {
+	var odd bool
+	if r.m.Orientation == "hexagonal" {
+		xs = 0
+		xe = r.m.Width
+		xi = 2
+		ys = 0
+		ye = r.m.Height
+		yi = 1
+		odd = true
+	} else if r.m.RenderOrder == "" || r.m.RenderOrder == "right-down" {
 		xs = 0
 		xe = r.m.Width
 		xi = 1
@@ -151,30 +185,22 @@ func (r *Renderer) _renderLayer(layer *tiled.Layer) error {
 		return ErrUnsupportedRenderOrder
 	}
 
-	i := 0
 	for y := ys; y*yi < ye; y = y + yi {
-		for x := xs; x*xi < xe; x = x + xi {
-			if layer.Tiles[i].IsNil() {
-				i++
-				continue
-			}
-
-			img, err := r.getTileImage(layer.Tiles[i])
-			if err != nil {
+		i := (y - ys) * xe
+		for x := xs; x < xe; x = x + xi {
+			if err := r._renderTile(layer, i, x, y); err != nil {
 				return err
 			}
-
-			pos := r.engine.GetTilePosition(x, y)
-
-			if layer.Opacity < 1 {
-				mask := image.NewUniform(color.Alpha{uint8(layer.Opacity * 255)})
-
-				draw.DrawMask(r.Result, pos, img, img.Bounds().Min, mask, mask.Bounds().Min, draw.Over)
-			} else {
-				draw.Draw(r.Result, pos, img, img.Bounds().Min, draw.Over)
+			i += xi
+		}
+		if odd {
+			i = (y-ys)*xe + 1
+			for x := xs + 1; x < xe; x = x + xi {
+				if err := r._renderTile(layer, i, x, y); err != nil {
+					return err
+				}
+				i += xi
 			}
-
-			i++
 		}
 	}
 
